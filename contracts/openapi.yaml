@@ -1,0 +1,128 @@
+openapi: 3.0.3
+info:
+  title: ProofPulse Evidence Ledger + Attestation Engine
+  version: 0.1.0
+servers:
+  - url: http://localhost:3001
+    description: Ingestion Gateway
+  - url: http://localhost:8081
+    description: Ledger Service
+
+paths:
+  /events:
+    post:
+      summary: Ingest a new evidence event (idempotent via Idempotency-Key)
+      parameters:
+        - in: header
+          name: Idempotency-Key
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/EvidenceEventV1"
+      responses:
+        "201":
+          description: Accepted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/IngestAccepted"
+        "400":
+          description: Validation error
+        "409":
+          description: Duplicate eventId
+
+  /events/{eventId}:
+    get:
+      summary: Get stored event by ID (ledger lookup)
+      parameters:
+        - in: path
+          name: eventId
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: EvidenceEvent found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EvidenceEventStoredV1"
+        "404":
+          description: Not found
+
+  /health:
+    get:
+      summary: Health check
+      responses:
+        "200":
+          description: OK
+
+components:
+  schemas:
+    EvidenceEventV1:
+      type: object
+      additionalProperties: false
+      required:
+        - schemaVersion
+        - eventId
+        - projectId
+        - artifactId
+        - source
+        - timestamp
+        - type
+        - payload
+      properties:
+        schemaVersion:
+          type: integer
+          enum: [1]
+        eventId:
+          type: string
+          format: uuid
+        projectId:
+          type: string
+          minLength: 3
+          maxLength: 64
+          pattern: "^[a-zA-Z0-9._-]+$"
+        artifactId:
+          type: string
+          minLength: 3
+          maxLength: 128
+          pattern: "^[a-zA-Z0-9./:_-]+$"
+        source:
+          type: string
+          minLength: 1
+        timestamp:
+          type: string
+          format: date-time
+        type:
+          type: string
+          minLength: 1
+        payload:
+          type: object
+
+    IngestAccepted:
+      type: object
+      required: [eventId, status]
+      properties:
+        eventId:
+          type: string
+          format: uuid
+        status:
+          type: string
+          enum: [ACCEPTED]
+
+    EvidenceEventStoredV1:
+      allOf:
+        - $ref: "#/components/schemas/EvidenceEventV1"
+        - type: object
+          required: [insertedAt]
+          properties:
+            insertedAt:
+              type: string
+              format: date-time

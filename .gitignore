@@ -1,0 +1,24 @@
+# Node
+node_modules/
+dist/
+.env
+
+# Maven / Java
+target/
+*.log
+*.class
+
+# IDE
+.idea/
+.vscode/
+*.iml
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Docker volumes
+pp_pgdata/
+
+# Misc
+event.json
