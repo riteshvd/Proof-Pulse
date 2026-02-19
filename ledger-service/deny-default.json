@@ -1,0 +1,10 @@
+[
+  {
+    "Type": "fixed-response",
+    "FixedResponseConfig": {
+      "StatusCode": "404",
+      "ContentType": "text/plain",
+      "MessageBody": "not found"
+    }
+  }
+]

@@ -1,0 +1,64 @@
+{
+    "family":  "proofpulse-ledger",
+    "networkMode":  "awsvpc",
+    "requiresCompatibilities":  [
+                                    "FARGATE"
+                                ],
+    "cpu":  "256",
+    "memory":  "512",
+    "executionRoleArn":  "arn:aws:iam::412403228573:role/ecsTaskExecutionRole",
+    "taskRoleArn":  "arn:aws:iam::412403228573:role/proofpulseTaskRole",
+    "containerDefinitions":  [
+                                 {
+                                     "name":  "ledger",
+                                     "image":  "412403228573.dkr.ecr.us-east-1.amazonaws.com/proofpulse-ledger-service:latest",
+                                     "essential":  true,
+                                     "portMappings":  [
+                                                          {
+                                                              "containerPort":  8081,
+                                                              "protocol":  "tcp"
+                                                          }
+                                                      ],
+                                     "environment":  [
+                                                         {
+                                                             "name":  "SERVER_PORT",
+                                                             "value":  "8081"
+                                                         },
+                                                         {
+                                                             "value":  "true",
+                                                             "name":  "SPRING_FLYWAY_ENABLED"
+                                                         },
+                                                         {
+                                                             "value":  "true",
+                                                             "name":  "SPRING_FLYWAY_BASELINE_ON_MIGRATE"
+                                                         },
+                                                         {
+                                                             "value":  "validate",
+                                                             "name":  "SPRING_JPA_HIBERNATE_DDL_AUTO"
+                                                         },
+                                                         {
+                                                             "value":  "jdbc:postgresql:///proofpulse",
+                                                             "name":  "SPRING_DATASOURCE_URL"
+                                                         }
+                                                     ],
+                                     "logConfiguration":  {
+                                                              "logDriver":  "awslogs",
+                                                              "options":  {
+                                                                              "awslogs-region":  "us-east-1",
+                                                                              "awslogs-group":  "/ecs/proofpulse-ledger",
+                                                                              "awslogs-stream-prefix":  "ecs"
+                                                                          }
+                                                          },
+                                     "secrets":  [
+                                                     {
+                                                         "valueFrom":  "arn:aws:secretsmanager:us-east-1:412403228573:secret:proofpulse/prod/db-username-WW05Pw",
+                                                         "name":  "SPRING_DATASOURCE_USERNAME"
+                                                     },
+                                                     {
+                                                         "valueFrom":  "arn:aws:secretsmanager:us-east-1:412403228573:secret:proofpulse/prod/db-password-7CaNgX",
+                                                         "name":  "SPRING_DATASOURCE_PASSWORD"
+                                                     }
+                                                 ]
+                                 }
+                             ]
+}

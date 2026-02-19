@@ -1,9 +1,7 @@
 package com.proofpulse.ledger.storage;
 
-import java.io.InputStream;
-import java.util.Optional;
-
 public interface BlobStore {
-  String put(String key, InputStream data, String contentType);
-  Optional<InputStream> get(String key);
+  void put(String key, byte[] data) throws Exception;
+  byte[] get(String key) throws Exception;
+  boolean exists(String key);
 }

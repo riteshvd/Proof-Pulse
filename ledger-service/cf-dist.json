@@ -1,0 +1,28 @@
+{
+  "CallerReference": "2026-02-18T19:05:03",
+  "Comment": "ProofPulse website",
+  "Enabled": true,
+  "DefaultRootObject": "index.html",
+  "Aliases": { "Quantity": 1, "Items": ["www.ledger-proofpulse.com"] },
+  "Origins": {
+    "Quantity": 1,
+    "Items": [{
+      "Id": "s3-www.ledger-proofpulse.com",
+      "DomainName": "www.ledger-proofpulse.com.s3.amazonaws.com",
+      "OriginAccessControlId": "",
+      "S3OriginConfig": { "OriginAccessIdentity": "" }
+    }]
+  },
+  "DefaultCacheBehavior": {
+    "TargetOriginId": "s3-www.ledger-proofpulse.com",
+    "ViewerProtocolPolicy": "redirect-to-https",
+    "AllowedMethods": { "Quantity": 2, "Items": ["GET","HEAD"], "CachedMethods": { "Quantity": 2, "Items": ["GET","HEAD"] } },
+    "Compress": true,
+    "CachePolicyId": "658327ea-f89d-4fab-a63d-7e88639e58f6"
+  },
+  "ViewerCertificate": {
+    "ACMCertificateArn": "arn:aws:acm:us-east-1:412403228573:certificate/2fedee5c-e053-4c17-89a0-8f684096a014",
+    "SSLSupportMethod": "sni-only",
+    "MinimumProtocolVersion": "TLSv1.2_2021"
+  }
+}

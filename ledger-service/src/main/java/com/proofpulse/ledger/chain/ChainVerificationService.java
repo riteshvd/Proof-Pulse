@@ -1,175 +1,207 @@
 package com.proofpulse.ledger.chain;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.proofpulse.ledger.crypto.CanonicalJson;
-import com.proofpulse.ledger.crypto.Hashing;
-import com.proofpulse.ledger.model.EvidenceEvent;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.proofpulse.ledger.crypto.EventCanonical;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
 import java.time.Instant;
-import java.time.OffsetDateTime;
 import java.util.*;
 
 @Service
 public class ChainVerificationService {
 
   private final JdbcTemplate jdbc;
-  private final ObjectMapper parseMapper = new ObjectMapper();
 
   public ChainVerificationService(JdbcTemplate jdbc) {
     this.jdbc = jdbc;
   }
 
-  public Map<String, Object> verify(String projectId, String artifactId) throws Exception {
-    List<Row> rows = load(projectId, artifactId);
-    if (rows.isEmpty()) return null;
-
-    String computedPrev = null;
-    long headIndex = -1;
-    String headHash = null;
-
-    for (Row r : rows) {
-      if (!Objects.equals(r.prevHash, computedPrev)) {
-        return mismatch(projectId, artifactId, rows.size(), r.chainIndex,
-            "prev_hash mismatch", r.prevHash, computedPrev, r.eventHash, null);
-      }
-
-      EvidenceEvent e = toEvent(r);
-      String canonical = CanonicalJson.stringify(e);
-      String expectedHash = Hashing.sha256Hex(computedPrev, canonical);
-
-      if (!Objects.equals(r.eventHash, expectedHash)) {
-        return mismatch(projectId, artifactId, rows.size(), r.chainIndex,
-            "event_hash mismatch", r.prevHash, computedPrev, r.eventHash, expectedHash);
-      }
-
-      computedPrev = r.eventHash;
-      headIndex = r.chainIndex;
-      headHash = r.eventHash;
+  public Map<String, Object> verify(String projectId, String artifactId) {
+    List<Row> rows = loadRows(projectId, artifactId);
+    if (rows.isEmpty()) {
+      return result(projectId, artifactId, false, 0, null,
+          "no_chain", null, null, null, null);
     }
 
-    return Map.of(
-      "projectId", projectId,
-      "artifactId", artifactId,
-      "computedAt", Instant.now().toString(),
-      "valid", true,
-      "totalEvents", rows.size(),
-      "headChainIndex", headIndex,
-      "headHash", headHash
-    );
+    String prev = null;
+
+    for (int i = 0; i < rows.size(); i++) {
+      Row r = rows.get(i);
+
+      String expectedPrev = (i == 0) ? null : prev;
+
+      if (!Objects.equals(expectedPrev, r.prevHash)) {
+        return result(projectId, artifactId, false, rows.size(), (long) i,
+            "prev_hash mismatch",
+            r.prevHash, expectedPrev,
+            r.eventHash, null);
+      }
+
+      try {
+        JsonNode payloadNode = EventCanonical.mapper().readTree(r.payloadJsonCanonical);
+
+        String canonicalEvent = EventCanonical.canonicalEventJson(
+            r.schemaVersion,
+            r.eventId,
+            r.projectId,
+            r.artifactId,
+            r.source,
+            r.ts,
+            r.type,
+            payloadNode
+        );
+
+        String expectedEventHash = sha256Hex((expectedPrev == null ? "" : expectedPrev) + "|" + canonicalEvent);
+
+        if (!Objects.equals(expectedEventHash, r.eventHash)) {
+          return result(projectId, artifactId, false, rows.size(), (long) i,
+              "event_hash mismatch",
+              r.prevHash, expectedPrev,
+              r.eventHash, expectedEventHash);
+        }
+
+        prev = expectedEventHash;
+      } catch (Exception ex) {
+        return result(projectId, artifactId, false, rows.size(), (long) i,
+            "verification_error: " + ex.getMessage(),
+            null, null, null, null);
+      }
+    }
+
+    return result(projectId, artifactId, true, rows.size(), null,
+        null, null, null, null, null);
   }
 
+  /**
+   * Repairs prev_hash + event_hash for all events using the canonical hashing logic.
+   * This is the permanent fix once hashing logic changed mid-project.
+   */
   @Transactional
-  public Map<String, Object> repair(String projectId, String artifactId) throws Exception {
-    List<Row> rows = load(projectId, artifactId);
-    if (rows.isEmpty()) return null;
-
-    String computedPrev = null;
-
-    for (Row r : rows) {
-      EvidenceEvent e = toEvent(r);
-      String canonical = CanonicalJson.stringify(e);
-      String expectedHash = Hashing.sha256Hex(computedPrev, canonical);
-
-      // update row hashes (even if already present; safe)
-      jdbc.update("""
-          UPDATE evidence_events
-          SET prev_hash = ?, event_hash = ?
-          WHERE event_id = ?
-        """, computedPrev, expectedHash, r.eventId);
-
-      computedPrev = expectedHash;
+  public Map<String, Object> repair(String projectId, String artifactId) {
+    List<Row> rows = loadRows(projectId, artifactId);
+    if (rows.isEmpty()) {
+      return result(projectId, artifactId, false, 0, null,
+          "no_chain", null, null, null, null);
     }
 
-    // return fresh verification
+    // Prevent concurrent inserts while repairing
+    jdbc.update("SELECT pg_advisory_xact_lock(hashtext(?))", projectId + "|" + artifactId);
+
+    String prev = null;
+
+    for (Row r : rows) {
+      try {
+        JsonNode payloadNode = EventCanonical.mapper().readTree(r.payloadJsonCanonical);
+
+        String canonicalEvent = EventCanonical.canonicalEventJson(
+            r.schemaVersion,
+            r.eventId,
+            r.projectId,
+            r.artifactId,
+            r.source,
+            r.ts,
+            r.type,
+            payloadNode
+        );
+
+        String newEventHash = sha256Hex((prev == null ? "" : prev) + "|" + canonicalEvent);
+        String newPrevHash = prev;
+
+        jdbc.update("""
+            UPDATE evidence_events
+            SET prev_hash = ?, event_hash = ?
+            WHERE project_id = ? AND artifact_id = ? AND chain_index = ?
+            """,
+            newPrevHash,
+            newEventHash,
+            projectId,
+            artifactId,
+            r.chainIndex
+        );
+
+        prev = newEventHash;
+      } catch (Exception ex) {
+        return result(projectId, artifactId, false, rows.size(), null,
+            "repair_error: " + ex.getMessage(),
+            null, null, null, null);
+      }
+    }
+
     return verify(projectId, artifactId);
   }
 
-  private List<Row> load(String projectId, String artifactId) {
+  private List<Row> loadRows(String projectId, String artifactId) {
     return jdbc.query("""
-        SELECT event_id, schema_version, project_id, artifact_id, source, ts, type, payload,
-               chain_index, prev_hash, event_hash
+        SELECT event_id, schema_version, project_id, artifact_id, source, ts, type, payload, chain_index, prev_hash, event_hash
         FROM evidence_events
-        WHERE project_id = ? AND artifact_id = ?
+        WHERE project_id=? AND artifact_id=?
         ORDER BY chain_index ASC
-      """, (rs, i) -> {
-      Row r = new Row();
-      r.eventId = UUID.fromString(rs.getString("event_id"));
-      r.schemaVersion = rs.getInt("schema_version");
-      r.projectId = rs.getString("project_id");
-      r.artifactId = rs.getString("artifact_id");
-      r.source = rs.getString("source");
-
-      OffsetDateTime odt = rs.getObject("ts", OffsetDateTime.class);
-      r.timestamp = odt.toInstant();
-
-      r.type = rs.getString("type");
-      Object payloadObj = rs.getObject("payload");
-      r.payloadJson = (payloadObj == null) ? "{}" : payloadObj.toString();
-
-      r.chainIndex = rs.getLong("chain_index");
-      r.prevHash = rs.getString("prev_hash");
-      r.eventHash = rs.getString("event_hash");
-      return r;
-    }, projectId, artifactId);
+        """,
+        ps -> { ps.setString(1, projectId); ps.setString(2, artifactId); },
+        (rs, i) -> new Row(
+            UUID.fromString(rs.getString("event_id")),
+            rs.getInt("schema_version"),
+            rs.getString("project_id"),
+            rs.getString("artifact_id"),
+            rs.getString("source"),
+            rs.getTimestamp("ts").toInstant(),
+            rs.getString("type"),
+            rs.getString("payload"),
+            rs.getLong("chain_index"),
+            rs.getString("prev_hash"),
+            rs.getString("event_hash")
+        )
+    );
   }
 
-  private EvidenceEvent toEvent(Row r) throws Exception {
-    EvidenceEvent e = new EvidenceEvent();
-    e.schemaVersion = r.schemaVersion;
-    e.eventId = r.eventId;
-    e.projectId = r.projectId;
-    e.artifactId = r.artifactId;
-    e.source = r.source;
-    e.timestamp = r.timestamp;
-    e.type = r.type;
-
-    @SuppressWarnings("unchecked")
-    Map<String, Object> payloadMap = parseMapper.readValue(r.payloadJson, Map.class);
-    e.payload = payloadMap;
-
-    return e;
-  }
-
-  private Map<String, Object> mismatch(
+  private static Map<String, Object> result(
       String projectId,
       String artifactId,
-      int total,
-      long firstBadIndex,
+      boolean valid,
+      long totalEvents,
+      Long firstMismatchIndex,
       String reason,
-      String storedPrev,
-      String expectedPrev,
-      String storedHash,
-      String expectedHash
+      String storedPrevHash,
+      String expectedPrevHash,
+      String storedEventHash,
+      String expectedEventHash
   ) {
-    Map<String, Object> out = new LinkedHashMap<>();
-    out.put("projectId", projectId);
-    out.put("artifactId", artifactId);
-    out.put("computedAt", Instant.now().toString());
-    out.put("valid", false);
-    out.put("totalEvents", total);
-    out.put("firstMismatchIndex", firstBadIndex);
-    out.put("reason", reason);
-    out.put("storedPrevHash", storedPrev);
-    out.put("expectedPrevHash", expectedPrev);
-    out.put("storedEventHash", storedHash);
-    out.put("expectedEventHash", expectedHash);
-    return out;
+    Map<String, Object> m = new LinkedHashMap<>();
+    m.put("projectId", projectId);
+    m.put("artifactId", artifactId);
+    m.put("computedAt", Instant.now().toString());
+    m.put("valid", valid);
+    m.put("totalEvents", totalEvents);
+    m.put("firstMismatchIndex", firstMismatchIndex);
+    m.put("reason", reason);
+    m.put("storedPrevHash", storedPrevHash);
+    m.put("expectedPrevHash", expectedPrevHash);
+    m.put("storedEventHash", storedEventHash);
+    m.put("expectedEventHash", expectedEventHash);
+    return m;
   }
 
-  private static class Row {
-    UUID eventId;
-    int schemaVersion;
-    String projectId;
-    String artifactId;
-    String source;
-    Instant timestamp;
-    String type;
-    String payloadJson;
-    long chainIndex;
-    String prevHash;
-    String eventHash;
+  private static String sha256Hex(String s) throws Exception {
+    MessageDigest md = MessageDigest.getInstance("SHA-256");
+    byte[] dig = md.digest(s.getBytes(StandardCharsets.UTF_8));
+    return HexFormat.of().formatHex(dig);
   }
+
+  private record Row(
+      UUID eventId,
+      int schemaVersion,
+      String projectId,
+      String artifactId,
+      String source,
+      Instant ts,
+      String type,
+      String payloadJsonCanonical,
+      long chainIndex,
+      String prevHash,
+      String eventHash
+  ) {}
 }

@@ -6,6 +6,7 @@ import org.springframework.web.bind.annotation.*;
 import java.util.Map;
 
 @RestController
+@RequestMapping("/chains")
 public class ChainVerificationController {
 
   private final ChainVerificationService verifier;
@@ -14,32 +15,19 @@ public class ChainVerificationController {
     this.verifier = verifier;
   }
 
-  @GetMapping("/chains/verify")
-  public ResponseEntity<?> verify(
+  @GetMapping("/verify")
+  public ResponseEntity<Map<String, Object>> verify(
       @RequestParam String projectId,
       @RequestParam String artifactId
   ) {
-    try {
-      Map<String, Object> report = verifier.verify(projectId, artifactId);
-      if (report == null) return ResponseEntity.status(404).body(Map.of("error", "No chain found"));
-      return ResponseEntity.ok(report);
-    } catch (Exception ex) {
-      return ResponseEntity.status(500).body(Map.of("error", "Verification failed", "message", ex.getMessage()));
-    }
+    return ResponseEntity.ok(verifier.verify(projectId, artifactId));
   }
 
-  // One-time backfill after schema upgrades
-  @PostMapping("/chains/repair")
-  public ResponseEntity<?> repair(
+  @PostMapping("/repair")
+  public ResponseEntity<Map<String, Object>> repair(
       @RequestParam String projectId,
       @RequestParam String artifactId
   ) {
-    try {
-      Map<String, Object> report = verifier.repair(projectId, artifactId);
-      if (report == null) return ResponseEntity.status(404).body(Map.of("error", "No chain found"));
-      return ResponseEntity.ok(report);
-    } catch (Exception ex) {
-      return ResponseEntity.status(500).body(Map.of("error", "Repair failed", "message", ex.getMessage()));
-    }
+    return ResponseEntity.ok(verifier.repair(projectId, artifactId));
   }
 }

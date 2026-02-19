@@ -1,0 +1,7 @@
+{
+  "Name": "pp-oac-www-ledger",
+  "Description": "OAC for www.ledger-proofpulse.com S3 origin",
+  "SigningProtocol": "sigv4",
+  "SigningBehavior": "always",
+  "OriginAccessControlOriginType": "s3"
+}

@@ -1,0 +1,30 @@
+{
+  "family": "proofpulse-gateway",
+  "networkMode": "awsvpc",
+  "requiresCompatibilities": ["FARGATE"],
+  "cpu": "256",
+  "memory": "512",
+  "executionRoleArn": "arn:aws:iam::412403228573:role/ecsTaskExecutionRole",
+  "taskRoleArn": "arn:aws:iam::412403228573:role/proofpulseTaskRole",
+  "containerDefinitions": [
+    {
+      "name": "gateway",
+      "image": "412403228573.dkr.ecr.us-east-1.amazonaws.com/proofpulse-ingest-gateway:1",
+      "essential": true,
+      "portMappings": [{ "containerPort": 3001, "protocol": "tcp" }],
+      "environment": [
+        { "name":"LEDGER_BASE_URL","value":"http://ledger.proofpulse.local:8081" }
+      ],
+      "logConfiguration": {
+        "logDriver": "awslogs",
+        "options": {
+          "awslogs-region": "us-east-1",
+          "awslogs-group": "/ecs/proofpulse-gateway",
+          "awslogs-stream-prefix": "ecs"
+        }
+      }
+    }
+  ]
+}
+
+
