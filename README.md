@@ -1,194 +1,297 @@
-# Real-Time Sign Language Recognition
+# Proof-Pulse
 
-A computer vision project for classifying hand gestures from images and detecting gestures through a live webcam feed. Built with Python, TensorFlow/Keras, OpenCV, and MediaPipe.
+An evidence ledger for recording software events, checking their integrity, and generating signed attestations.
+
+Built with Java, Spring Boot, TypeScript, NestJS, PostgreSQL, and Redis.
 
 ## Overview
 
-This project explores two approaches to hand gesture recognition:
+Proof-Pulse organizes evidence events by project and artifact. Each event is linked to the previous event through a SHA-256 hash, creating a history that can be checked for changes.
 
-- **Image classification:** Training a custom CNN and a VGG19-based classifier on labeled gesture images.
-- **Live recognition:** Extracting hand landmarks with MediaPipe and predicting gestures using a saved model.
+The application separates event ingestion from ledger storage. A NestJS gateway validates incoming requests and caches successful responses in Redis. A Spring Boot service stores events in PostgreSQL, verifies hash chains, and generates Ed25519-signed attestation bundles.
 
-The project includes image collection, preprocessing, training, visualization, and webcam inference. It focuses on a fixed set of gestures rather than continuous sign language translation.
-
-## Tech Stack
-
-| Area | Tools |
-|---|---|
-| Programming | Python |
-| Deep Learning | TensorFlow, Keras |
-| Computer Vision | OpenCV, MediaPipe |
-| Data Processing | NumPy, scikit-learn |
-| Visualization | Matplotlib |
-| Development | Jupyter Notebook |
+Bundles can be stored locally or in Amazon S3.
 
 ## Features
 
-- Webcam gesture prediction with labels displayed on the video feed.
-- Hand landmark detection and visualization.
-- Image resizing, grayscale conversion, and normalization.
-- Image statistics and Local Binary Pattern visualization.
-- Custom CNN and VGG19 training experiments.
-- Training accuracy comparison.
-- Labeled image collection using a webcam.
+- Request validation for structured evidence events.
+- Redis-backed response caching using an `Idempotency-Key`.
+- PostgreSQL storage with Flyway database migrations.
+- Separate hash chains for each project and artifact.
+- Canonical JSON serialization for consistent hashing.
+- Chain integrity verification.
+- Ed25519 attestation generation and verification.
+- Local and S3 storage for attestation bundles.
+- Presigned S3 download URLs.
+- Swagger documentation for the ingestion gateway.
 
-## Implementation
+## Tech Stack
 
-### Image Classification
+| Component | Technology |
+|---|---|
+| Ingestion Gateway | TypeScript, NestJS 10 |
+| Ledger Service | Java 17, Spring Boot 3.3.2 |
+| Database | PostgreSQL 16 |
+| Response Cache | Redis 7 |
+| Database Migrations | Flyway |
+| Integrity and Signing | SHA-256, Ed25519 |
+| Bundle Storage | Local filesystem, Amazon S3 |
+| Local Infrastructure | Docker Compose |
+| API Documentation | Swagger, OpenAPI |
 
-Images are loaded from class folders in `Code/Dataset/`, resized to **50 × 50 pixels**, and converted to grayscale. The grayscale channel is repeated to create three-channel inputs, and pixel values are normalized.
+## Architecture
 
-The dataset is split into **80% training and 20% testing**, with 10% of the training portion reserved for validation.
+The gateway handles validation and request retries. The ledger service handles persistence, hashing, and attestations.
 
-| Model | Architecture | Training |
-|---|---|---|
-| Custom CNN | Three convolutional blocks, pooling, dropout, and dense layers | 10 epochs |
-| VGG19 | Frozen ImageNet backbone with a custom classification head | 5 epochs |
+```mermaid
+flowchart TD
+    A["Client"] --> B["NestJS Gateway"]
+    B --> C["Redis Response Cache"]
+    B --> D["Spring Boot Ledger"]
+    D --> E["PostgreSQL Event Chains"]
+    D --> F["Attestation Generation and Verification"]
+    F --> G["Local Files or Amazon S3"]
+```
 
-Both models use a batch size of 32 and classify 10 gesture categories.
+### Event Ingestion
 
-### Live Recognition
+1. The client submits an event with an `Idempotency-Key` header.
+2. The gateway validates the request body.
+3. If Redis contains a response for that key, the gateway returns it.
+4. Otherwise, the gateway forwards the event to the ledger.
+5. The ledger canonicalizes the event and calculates its hash using the previous hash.
+6. The event is stored in PostgreSQL.
+7. The gateway caches the successful response for five minutes.
 
-The webcam workflow uses a separate saved model:
+### Attestation Generation
 
-1. Capture a frame using OpenCV.
-2. Detect a hand and extract landmarks using MediaPipe.
-3. Pass the landmark coordinates to `mp_hand_gesture`.
-4. Read the predicted label from `gesture.names`.
-5. Display the label and hand landmarks.
+1. Verify the selected project and artifact chain.
+2. Record the chain head hash and index in an attestation payload.
+3. Sign the canonical payload using Ed25519.
+4. Store the bundle locally or in S3.
+5. Return a bundle ID and download location.
 
-The webcam demo does not use the CNN or VGG19 models trained in the earlier notebook cells.
+Verification checks the signature, canonical payload, chain integrity, and whether the attestation matches the current chain head.
 
-## Project Files
+## Repository Structure
 
 | Path | Purpose |
 |---|---|
-| `Code/MainFile.ipynb` | Preprocessing, training, comparison, and webcam recognition |
-| `Code/Image Collection.ipynb` | Capture labeled gesture images |
-| `Code/Old code.ipynb` | Earlier implementation |
-| `Code/Dataset/` | Image classification dataset |
-| `Code/ImageCollectionDataset/` | Collected webcam images |
-| `Code/mp_hand_gesture/` | Saved model used for live recognition |
-| `Code/gesture.names` | Labels for webcam predictions |
-| `Code/label_map.json` | Image classification label mapping |
-| `Code/*.h5` | Saved model artifacts |
-| `Code/*.npy` | Saved training and test arrays |
+| `ingest-gateway/` | NestJS API, validation, response caching, and ledger client |
+| `ledger-service/` | Spring Boot application and Maven configuration |
+| `ledger-service/src/main/java/com/proofpulse/ledger/` | Ledger, hashing, verification, signing, and storage code |
+| `ledger-service/src/main/resources/db/migration/` | Flyway database migrations |
+| `ledger-service/attestation-bundles/` | Example attestation bundles |
+| `ledger-service/site/` | Static site files |
+| `contracts/openapi.yaml` | API contract |
+| `infra/docker-compose.yml` | Local PostgreSQL and Redis services |
+| `attestation.json` | Example attestation |
 
-## Setup
+The repository also includes AWS deployment configuration files for ECS, S3, CloudFront, and IAM. These contain environment-specific settings and require adaptation before use.
+
+## Local Setup
 
 ### Requirements
 
-- Python
-- Jupyter Notebook
-- A webcam for live recognition
-- A local desktop environment for OpenCV windows
+- Java 17
+- Maven
+- Node.js and npm compatible with NestJS 10
+- Docker with Docker Compose
+- Git
 
-The notebooks use legacy TensorFlow/Keras and MediaPipe APIs. Dependency versions are not pinned, so compatibility adjustments may be needed.
-
-### Clone the Repository
-
-```bash
-git clone https://github.com/riteshvd/Real-Time-Sign-Language-Recogniton.git
-cd Real-Time-Sign-Language-Recogniton
-```
-
-### Create a Virtual Environment
+### 1. Clone the Repository
 
 ```bash
-python -m venv .venv
+git clone https://github.com/riteshvd/Proof-Pulse.git
+cd Proof-Pulse
 ```
 
-Activate on Windows:
+### 2. Start PostgreSQL and Redis
 
-```powershell
-.venv\Scripts\Activate.ps1
-```
-
-Activate on macOS or Linux:
+From the repository root:
 
 ```bash
-source .venv/bin/activate
+docker compose -f infra/docker-compose.yml up -d
 ```
 
-### Install Packages
+Check the containers:
 
 ```bash
-python -m pip install tensorflow mediapipe opencv-python numpy matplotlib scikit-learn pillow notebook
+docker compose -f infra/docker-compose.yml ps
 ```
 
-The image selection cell also requires Tkinter.
+The local database configuration uses:
 
-**Compatibility:** The live demo uses `mp.solutions.hands` and loads a SavedModel directory through `load_model()`. Use package versions that support these APIs or update the loading and detection code.
+| Setting | Value |
+|---|---|
+| Database | `proofpulse` |
+| Username | `proofpulse` |
+| Password | `proofpulse` |
+| PostgreSQL Port | `5432` |
+| Redis Port | `6379` |
 
-### Open the Notebook
+These credentials are for local development.
+
+### 3. Start the Ledger Service
+
+In a separate terminal:
 
 ```bash
-cd Code
-jupyter notebook
+cd ledger-service
+mvn spring-boot:run
 ```
 
-Open `MainFile.ipynb`. Keep the working directory set to `Code` so the relative paths resolve correctly.
+The ledger listens on port `8081`. Flyway is configured to apply database migrations at startup.
 
-## Usage
+### 4. Start the Ingestion Gateway
 
-### Run Live Recognition
+In another terminal, from the repository root:
 
-1. Open `MainFile.ipynb`.
-2. Find the cell labeled `LIVE GESTURE DETECTION WITH MODEL`.
-3. Confirm that `mp_hand_gesture/` and `gesture.names` are present.
-4. Run the cell and hold one hand in front of the webcam.
-5. Press **q** in the video window to exit.
-
-The demo uses `cv2.VideoCapture(0)`. Change the camera index if needed. Running the training cells is not required for this demo.
-
-### Train the Models
-
-Run the preprocessing and training cells in order. The notebook expects these folders inside `Dataset/`:
-
-```text
-call_me
-fingers_crossed
-okay
-paper
-peace
-rock
-rock_on
-scissor
-thumbs
-up
+```bash
+cd ingest-gateway
+npm ci
+npm run start:dev
 ```
 
-VGG19 may download ImageNet weights during the first run.
+The gateway listens on port `3001`.
 
-### Collect Images
+### Local URLs
 
-Open `Image Collection.ipynb` and update:
+| Service | URL |
+|---|---|
+| Gateway Health | http://localhost:3001/health |
+| Ledger Health | http://localhost:8081/health |
+| Gateway API Documentation | http://localhost:3001/docs |
 
-- `labels` to select gesture categories.
-- `number_imgs` to set the number of images per category.
+## Configuration
 
-The default collects five images each for `thumbsup`, `thumbsdown`, `peace`, and `livelong`.
+### Ingestion Gateway
 
-Images are saved to `ImageCollectionDataset/`. Organize them into the appropriate `Dataset/` folders before using them for training.
+| Variable | Purpose | Default |
+|---|---|---|
+| `LEDGER_URL` | Ledger service address | `http://localhost:8081` |
+| `REDIS_URL` | Redis connection string | `redis://localhost:6379` |
 
-## Evaluation and Limitations
+### Ledger Service
 
-- The comparison chart shows final **training accuracy**, not held-out test accuracy.
-- The still-image prediction section uses mean pixel intensity matching rather than neural network inference.
-- The training workflow and webcam demo use different label mappings.
-- Live detection supports one hand and depends on lighting, camera quality, and hand position.
-- The webcam landmark scaling uses swapped frame dimensions and needs review against the saved model's preprocessing.
-- The project does not perform sentence-level sign language translation.
+| Variable | Purpose |
+|---|---|
+| `SPRING_DATASOURCE_URL` | PostgreSQL JDBC URL |
+| `SPRING_DATASOURCE_USERNAME` | Database username |
+| `SPRING_DATASOURCE_PASSWORD` | Database password |
+| `PP_ATTEST_PRIVATE_KEY_B64` | Base64-encoded PKCS#8 Ed25519 private key |
+| `PP_ATTEST_PUBLIC_KEY_B64` | Base64-encoded X.509 Ed25519 public key |
+| `PP_S3_BUCKET` | Enables S3 bundle storage when set |
+| `PP_S3_PREFIX` | Object prefix; defaults to `attestations/` |
+| `PP_S3_PRESIGN_MINUTES` | Download URL lifetime; defaults to `15` |
+| `AWS_REGION` | AWS region; falls back to `AWS_DEFAULT_REGION`, then `us-east-1` |
+| `PP_S3_ENDPOINT` | Optional alternative S3 endpoint |
 
-## Planned Improvements
+Without a configured signing key pair, the service generates a development key pair at startup. Configure both key variables to preserve the signing identity across restarts.
 
-- Add pinned dependencies and reproducible setup instructions.
-- Separate training and inference into Python scripts.
-- Evaluate both image models on the test split.
-- Add confusion matrices, precision, recall, and F1 scores.
-- Standardize label mappings and preprocessing.
-- Improve camera error handling and add confidence thresholds.
-- Expand the dataset and explore recognition of gestures involving movement.
+S3 storage uses the AWS SDK default credential provider chain.
+
+## API Reference
+
+| Method | Endpoint | Service | Purpose |
+|---|---|---|---|
+| `GET` | `/health` | Gateway / Ledger | Health endpoint |
+| `POST` | `/events` | Gateway | Submit an evidence event |
+| `POST` | `/internal/ledger/events` | Ledger | Internal event ingestion |
+| `GET` | `/chains/verify` | Ledger | Verify a project/artifact chain |
+| `POST` | `/chains/repair` | Ledger | Recalculate chain data |
+| `POST` | `/attestations/generate` | Ledger | Generate a signed attestation |
+| `GET` | `/attestations/{bundleId}` | Ledger | Download a stored bundle |
+| `POST` | `/attestations/verify` | Ledger | Verify an attestation bundle |
+
+Chain and attestation generation endpoints accept `projectId` and `artifactId` query parameters.
+
+## Example Requests
+
+The following examples use Bash syntax. On Windows, use Git Bash or adapt the commands for PowerShell.
+
+### Submit an Event
+
+```bash
+curl -X POST http://localhost:3001/events \
+  -H "Content-Type: application/json" \
+  -H "Idempotency-Key: proofpulse-demo-001" \
+  -d '{
+    "schemaVersion": 1,
+    "eventId": "a4e8a3b0-58f0-4c9a-9f34-87c95a72d219",
+    "projectId": "proofpulse-demo",
+    "artifactId": "service:ledger",
+    "source": "local-demo",
+    "timestamp": "2026-09-25T12:00:00Z",
+    "type": "BUILD_COMPLETED",
+    "payload": {
+      "version": "1.0.0",
+      "status": "passed"
+    }
+  }'
+```
+
+A successful gateway response has this structure:
+
+```json
+{
+  "eventId": "a4e8a3b0-58f0-4c9a-9f34-87c95a72d219",
+  "status": "ACCEPTED"
+}
+```
+
+Use a new event ID and idempotency key for each new event. See the implementation notes below for a current first-event response issue.
+
+### Verify the Chain
+
+```bash
+curl "http://localhost:8081/chains/verify?projectId=proofpulse-demo&artifactId=service:ledger"
+```
+
+### Generate an Attestation
+
+```bash
+curl -X POST \
+  "http://localhost:8081/attestations/generate?projectId=proofpulse-demo&artifactId=service:ledger"
+```
+
+For local storage, the response includes a `bundleId` and `downloadEndpoint`. For S3 storage, it includes a presigned `downloadUrl`.
+
+### Download a Local Bundle
+
+Replace `BUNDLE_ID` with the returned ID:
+
+```bash
+curl "http://localhost:8081/attestations/BUNDLE_ID" \
+  -o downloaded-attestation.json
+```
+
+### Verify the Bundle
+
+```bash
+curl -X POST http://localhost:8081/attestations/verify \
+  -H "Content-Type: application/json" \
+  --data-binary @downloaded-attestation.json
+```
+
+## Implementation Notes
+
+- **First-event response:** The ledger builds its response using `Map.of()` with a null `prevHash` for the first event. Java rejects null map values, so this path can return an error after the insert statement. This needs correction before relying on the ingestion walkthrough.
+- **Retry handling:** Redis caches successful responses for five minutes. The cache lookup and ledger write are not atomic, so this does not provide exactly-once processing.
+- **Issuer trust:** Verification uses the public key supplied in the bundle. Establishing a trusted issuer requires a separate trusted-key policy.
+- **Chain updates:** Verification compares the attestation against the current chain head. Adding events can make an older attestation fail the head comparison even when its signature remains valid.
+- **Access control:** Authentication and authorization are not implemented in the inspected controllers. Ledger and repair endpoints should remain restricted during development.
+- **Integrity scope:** Hash chaining supports detection of inconsistent changes. It does not prevent a privileged database user from rewriting a chain.
+
+## Future Improvements
+
+- Correct ingestion response handling and duplicate-event status codes.
+- Add integration tests for ingestion, retries, and verification.
+- Add authentication and project-level authorization.
+- Make concurrent retry handling atomic.
+- Introduce trusted signing-key registration and rotation.
+- Support verification against historical chain heads.
+- Add automated build and deployment workflows.
 
 ## Contact
 
